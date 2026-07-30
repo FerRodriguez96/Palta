@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Panel · PALTA{% endblock %}
+
+{% block content %}
+<div class="top-row">
+    <div>
+        <h1>Panel de subidas</h1>
+        <p class="subtitle">Descarga videos desde carpetas de Drive y los sube al canal de YouTube.</p>
+    </div>
+    <span class="status-pill {{ 'corriendo' if estado and estado.corriendo }}" id="estado-pill">
+        <span id="estado-texto">{{ 'Procesando…' if estado and estado.corriendo else 'En espera' }}</span>
+    </span>
+</div>
+
+{% if not drive_ok or not youtube_ok %}
+<div class="card" style="border-color: var(--amarillo);">
+    <strong>Credenciales incompletas.</strong>
+    <span class="subtitle" style="margin:6px 0 0;">
+        {% if not drive_ok %}Falta la credencial de Google Drive. {% endif %}
+        {% if not youtube_ok %}El canal de YouTube no está autorizado.{% endif %}
+        Configuralas en <a href="{{ url_for('main.credenciales') }}" style="color: var(--verde-claro);">Credenciales</a>.
+    </span>
+</div>
+{% endif %}
+
+<h2>Carpetas configuradas</h2>
+{% if carpetas %}
+<div class="grid-cards" id="folder-grid">
+    {% for c in carpetas %}
+    <div class="folder-card" data-carpeta-id="{{ c.id }}">
+        <div class="folder-name">{{ c.nombre }}{% if not c.activo %} <span class="badge falta">inactiva</span>{% endif %}</div>
+        <div class="folder-id">{{ c.drive_folder_id }}</div>
+        <button type="button" class="pendientes-count" data-pendientes disabled>Consultando pendientes…</button>
+        <ul class="pendientes-list" data-pendientes-list hidden></ul>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="action-row">
+    <button class="btn btn-secondary" id="btn-procesar-seleccion" {{ 'disabled' if estado and estado.corriendo }} hidden>
+        Subir seleccionados (<span id="contador-seleccion">0</span>)
+    </button>
+    <button class="btn btn-primary" id="btn-procesar" {{ 'disabled' if estado and estado.corriendo }}>
+        Procesar todo
+    </button>
+</div>
+{% else %}
+<div class="card empty-state">Todavía no configuraste ninguna carpeta. Andá a <a href="{{ url_for('main.carpetas') }}" style="color: var(--verde-claro);">Carpetas</a> para agregar una.</div>
+{% endif %}
+
+<h2>Progreso en vivo</h2>
+<div class="card" id="progreso-card">
+    <div class="empty-state" id="progreso-vacio">No hay archivos en proceso ahora mismo.</div>
+    <div id="progreso-lista"></div>
+</div>
+
+<h2>Historial de subidas</h2>
+<div class="card">
+    {% if subidas %}
+    <table>
+        <thead>
+            <tr><th>Archivo</th><th>Carpeta</th><th>Video</th><th>Subido por</th><th>Fecha</th></tr>
+        </thead>
+        <tbody id="historial-body">
+            {% for s in subidas %}
+            <tr>
+                <td>{{ s.nombre_archivo }}</td>
+                <td>{{ s.carpeta or '—' }}</td>
+                <td class="mono">
+                    {% if s.youtube_id %}
+                    <a href="https://youtu.be/{{ s.youtube_id }}" target="_blank" rel="noopener">youtu.be/{{ s.youtube_id }}</a>
+                    {% else %}—{% endif %}
+                </td>
+                <td class="mono">{{ s.subido_por or '—' }}</td>
+                <td class="mono">{{ s.fecha_subida }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Todavía no se subió ningún video.</div>
+    {% endif %}
+</div>
+
+<h2>Logs</h2>
+<div class="log-panel" id="log-panel"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.PALTA_CARPETAS = {{ carpetas | tojson }};
+</script>
+{% endblock %}

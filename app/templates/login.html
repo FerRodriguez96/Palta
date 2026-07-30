@@ -1,0 +1,36 @@
+{% extends "base_login.html" %}
+{% block title %}Ingresar · PALTA{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+    <div class="auth-brand">
+        <svg viewBox="0 0 48 48" width="34" height="34">
+            <path d="M24 4 C33 4 40 14 40 26 C40 37 33 44 24 44 C15 44 8 37 8 26 C8 14 15 4 24 4 Z" fill="var(--verde)"/>
+            <circle cx="24" cy="27" r="9" fill="var(--carozo)"/>
+        </svg>
+        <span>PALTA</span>
+    </div>
+    <h1>Iniciar sesión</h1>
+    <p class="subtitle">Ingresá con tu usuario para poder disparar subidas y quede registrado quién lo hizo.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-stack">
+        {% for categoria, mensaje in messages %}
+            <div class="flash flash-{{ categoria }}">{{ mensaje }}</div>
+        {% endfor %}
+        </div>
+        {% endif %}
+    {% endwith %}
+
+    <form method="POST">
+        <label>Usuario
+            <input type="text" name="username" autocomplete="username" required autofocus>
+        </label>
+        <label>Contraseña
+            <input type="password" name="password" autocomplete="current-password" required>
+        </label>
+        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:6px;">Ingresar</button>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}PALTA{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 48 48" width="30" height="30">
+                        <path d="M24 4 C33 4 40 14 40 26 C40 37 33 44 24 44 C15 44 8 37 8 26 C8 14 15 4 24 4 Z" fill="var(--verde)"/>
+                        <circle cx="24" cy="27" r="9" fill="var(--carozo)"/>
+                    </svg>
+                </span>
+                <div>
+                    <div class="brand-name">PALTA</div>
+                    <div class="brand-sub">Drive &rarr; YouTube</div>
+                </div>
+            </div>
+            <nav class="nav">
+                <a href="{{ url_for('main.index') }}" class="{{ 'active' if request.endpoint == 'main.index' }}">Panel</a>
+                <a href="{{ url_for('main.carpetas') }}" class="{{ 'active' if request.endpoint == 'main.carpetas' }}">Carpetas</a>
+                <a href="{{ url_for('main.credenciales') }}" class="{{ 'active' if request.endpoint == 'main.credenciales' }}">Credenciales</a>
+                <a href="{{ url_for('main.usuarios') }}" class="{{ 'active' if request.endpoint == 'main.usuarios' }}">Usuarios</a>
+            </nav>
+            <div class="sidebar-user">
+                {% if current_user.is_authenticated %}
+                <span>{{ current_user.nombre_completo }}</span>
+                <a href="{{ url_for('main.logout') }}">Cerrar sesión</a>
+                {% endif %}
+            </div>
+            <div class="sidebar-footer">
+                <span class="dot" id="conn-dot"></span>
+                <span id="conn-label">Conectando…</span>
+            </div>
+        </aside>
+
+        <main class="content">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="flash-stack">
+                    {% for categoria, mensaje in messages %}
+                        <div class="flash flash-{{ categoria }}">{{ mensaje }}</div>
+                    {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

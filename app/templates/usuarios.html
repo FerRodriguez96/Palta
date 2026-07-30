@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Usuarios · PALTA{% endblock %}
+
+{% block content %}
+<h1>Usuarios</h1>
+<p class="subtitle">Cada persona que dispare una subida queda identificada con su usuario en el historial. No hay roles: todos los usuarios tienen los mismos permisos.</p>
+
+<div class="card">
+    <h2 style="margin-bottom:14px;">Agregar usuario</h2>
+    <form method="POST" action="{{ url_for('main.usuarios_agregar') }}" class="form-row">
+        <input type="text" name="username" placeholder="Usuario (ej: fernando)" required>
+        <input type="text" name="nombre_completo" placeholder="Nombre y apellido (opcional)">
+        <input type="password" name="password" placeholder="Contraseña" required>
+        <button type="submit" class="btn btn-primary">Agregar</button>
+    </form>
+</div>
+
+<div class="card">
+    {% if usuarios %}
+    <table>
+        <thead>
+            <tr><th>Usuario</th><th>Nombre</th><th>Creado</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for u in usuarios %}
+            <tr>
+                <td class="mono">{{ u.username }}</td>
+                <td>{{ u.nombre_completo or '—' }}</td>
+                <td class="mono">{{ u.creado_en or '—' }}</td>
+                <td style="text-align:right;">
+                    <form method="POST" action="{{ url_for('main.usuarios_eliminar', user_id=u.id) }}" class="inline" onsubmit="return confirm('¿Eliminar este usuario?');">
+                        <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No hay usuarios todavía.</div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Credenciales · PALTA{% endblock %}
+
+{% block content %}
+<h1>Credenciales</h1>
+<p class="subtitle">Gestioná las credenciales de Google necesarias para leer Drive y subir a YouTube.</p>
+
+<div class="card">
+    <div class="credencial-item">
+        <div class="credencial-info">
+            <div class="credencial-title">Cuenta de servicio de Google Drive</div>
+            <div class="credencial-desc">JSON de la cuenta de servicio con acceso de lectura a las carpetas configuradas.</div>
+        </div>
+        <span class="badge {{ 'ok' if drive_ok else 'falta' }}">{{ 'configurada' if drive_ok else 'falta' }}</span>
+    </div>
+    <form method="POST" action="{{ url_for('main.credenciales_drive') }}" enctype="multipart/form-data" class="form-row" style="margin-top:12px;">
+        <input type="file" name="archivo" accept="application/json" required>
+        <button type="submit" class="btn btn-secondary">Subir / reemplazar</button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="credencial-item">
+        <div class="credencial-info">
+            <div class="credencial-title">Client secret de YouTube (OAuth)</div>
+            <div class="credencial-desc">JSON de credenciales OAuth descargado desde Google Cloud Console (tipo aplicación web).</div>
+        </div>
+        <span class="badge {{ 'ok' if client_secret_ok else 'falta' }}">{{ 'configurado' if client_secret_ok else 'falta' }}</span>
+    </div>
+    <form method="POST" action="{{ url_for('main.credenciales_client_secret') }}" enctype="multipart/form-data" class="form-row" style="margin-top:12px;">
+        <input type="file" name="archivo" accept="application/json" required>
+        <button type="submit" class="btn btn-secondary">Subir / reemplazar</button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="credencial-item">
+        <div class="credencial-info">
+            <div class="credencial-title">Canal de YouTube autorizado</div>
+            <div class="credencial-desc">Autorizá el canal destino desde el navegador. No hace falta acceso a consola ni al servidor.</div>
+        </div>
+        <span class="badge {{ 'ok' if youtube_ok else 'falta' }}">{{ 'autorizado' if youtube_ok else 'falta' }}</span>
+    </div>
+    <div style="margin-top:12px;">
+        <a href="{{ url_for('main.credenciales_youtube_autorizar') }}" class="btn btn-primary" style="text-decoration:none; display:inline-block;">
+            {{ 'Re-autorizar canal' if youtube_ok else 'Autorizar canal de YouTube' }}
+        </a>
+        {% if not client_secret_ok %}
+        <span class="subtitle" style="display:block; margin-top:8px;">Subí primero el client secret de YouTube.</span>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

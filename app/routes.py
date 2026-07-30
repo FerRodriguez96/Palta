@@ -1,0 +1,348 @@
+import threading
+from flask import Blueprint, render_template, jsonify, current_app, request, redirect, url_for, session, flash
+from flask_login import (
+    login_user, logout_user, login_required, current_user,
+)
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from app.core.uploader import procesar_videos, procesar_seleccionados, hay_proceso_corriendo
+from app.utils.log_buffer import get_logs
+from app.services import db_service
+from app.services.drive_service import listar_archivos, limpiar_nombre_archivo
+from app.services.youtube_service import (
+    iniciar_autorizacion, completar_autorizacion, youtube_esta_autorizado,
+)
+from app.models import User
+import os
+
+bp = Blueprint("main", __name__)
+
+TITULO_MAX_LEN = 100
+
+
+# ---------- Autenticacion ----------
+
+@bp.before_app_request
+def _requerir_login():
+    # Si todavia no hay ningun usuario creado, solo se permite /setup
+    if not db_service.hay_usuarios():
+        if request.endpoint not in ("main.setup", "static"):
+            return redirect(url_for("main.setup"))
+        return
+
+    # Rutas publicas que no requieren sesion iniciada
+    rutas_publicas = ("main.login", "static")
+    if request.endpoint in rutas_publicas:
+        return
+
+    if not current_user.is_authenticated:
+        return redirect(url_for("main.login", next=request.path))
+
+
+@bp.route("/setup", methods=["GET", "POST"])
+def setup():
+    if db_service.hay_usuarios():
+        return redirect(url_for("main.login"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip().lower()
+        nombre_completo = request.form.get("nombre_completo", "").strip()
+        password = request.form.get("password", "")
+
+        if not username or not password:
+            flash("Completá usuario y contraseña.", "error")
+            return redirect(url_for("main.setup"))
+
+        db_service.crear_usuario(username, generate_password_hash(password), nombre_completo)
+        flash("Cuenta creada. Ya podés iniciar sesión.", "success")
+        return redirect(url_for("main.login"))
+
+    return render_template("setup.html")
+
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    if db_service.hay_usuarios() and current_user.is_authenticated:
+        return redirect(url_for("main.index"))
+
+    if not db_service.hay_usuarios():
+        return redirect(url_for("main.setup"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip().lower()
+        password = request.form.get("password", "")
+
+        fila = db_service.obtener_usuario_por_username(username)
+        if fila and check_password_hash(fila["password_hash"], password):
+            login_user(User(fila))
+            destino = request.args.get("next") or url_for("main.index")
+            return redirect(destino)
+
+        flash("Usuario o contraseña incorrectos.", "error")
+
+    return render_template("login.html")
+
+
+@bp.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("main.login"))
+
+
+# ---------- Usuarios ----------
+
+@bp.route("/usuarios")
+@login_required
+def usuarios():
+    return render_template("usuarios.html", usuarios=db_service.listar_usuarios())
+
+
+@bp.route("/usuarios/agregar", methods=["POST"])
+@login_required
+def usuarios_agregar():
+    username = request.form.get("username", "").strip().lower()
+    nombre_completo = request.form.get("nombre_completo", "").strip()
+    password = request.form.get("password", "")
+
+    if not username or not password:
+        flash("Completá usuario y contraseña.", "error")
+        return redirect(url_for("main.usuarios"))
+
+    if db_service.obtener_usuario_por_username(username):
+        flash("Ya existe un usuario con ese nombre.", "error")
+        return redirect(url_for("main.usuarios"))
+
+    db_service.crear_usuario(username, generate_password_hash(password), nombre_completo)
+    flash(f"Usuario '{username}' creado.", "success")
+    return redirect(url_for("main.usuarios"))
+
+
+@bp.route("/usuarios/<int:user_id>/eliminar", methods=["POST"])
+@login_required
+def usuarios_eliminar(user_id):
+    if str(user_id) == current_user.id:
+        flash("No podés eliminar tu propio usuario mientras estás conectado con él.", "error")
+        return redirect(url_for("main.usuarios"))
+
+    db_service.eliminar_usuario(user_id)
+    flash("Usuario eliminado.", "success")
+    return redirect(url_for("main.usuarios"))
+
+
+# ---------- Dashboard ----------
+
+@bp.route("/")
+def index():
+    carpetas = db_service.listar_carpetas()
+    subidas = db_service.listar_subidas(limit=50)
+    estado = db_service.get_estado_proceso()
+    return render_template(
+        "index.html", carpetas=carpetas, subidas=subidas, estado=estado,
+        youtube_ok=youtube_esta_autorizado(),
+        drive_ok=os.path.exists(current_app.config["SERVICE_ACCOUNT_FILE"]),
+    )
+
+
+@bp.route("/procesar", methods=["POST"])
+def procesar():
+    if hay_proceso_corriendo():
+        return {"status": "Ya hay un procesamiento en curso"}, 409
+
+    app = current_app._get_current_object()
+    config = dict(app.config)
+    usuario = current_user.username
+
+    def run():
+        with app.app_context():
+            procesar_videos(config, usuario)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+    return {"status": "Procesamiento iniciado"}, 202
+
+
+@bp.route("/procesar/seleccion", methods=["POST"])
+def procesar_seleccion():
+    if hay_proceso_corriendo():
+        return {"status": "Ya hay un procesamiento en curso"}, 409
+
+    payload = request.get_json(silent=True) or {}
+    items_entrantes = payload.get("items", [])
+
+    if not items_entrantes:
+        return {"status": "No se seleccionó ningún video"}, 400
+
+    carpetas = {c["id"]: c for c in db_service.listar_carpetas()}
+    items = []
+    for it in items_entrantes:
+        carpeta = carpetas.get(it.get("carpeta_id"))
+        if not carpeta or not it.get("drive_id") or not it.get("nombre"):
+            continue
+
+        titulo = (it.get("titulo") or "").strip()
+        titulo = titulo[:TITULO_MAX_LEN] if titulo else None
+
+        items.append({
+            "carpeta": carpeta["nombre"],
+            "drive_id": it["drive_id"],
+            "nombre": it["nombre"],
+            "titulo": titulo,
+        })
+
+    if not items:
+        return {"status": "La selección no es válida"}, 400
+
+    app = current_app._get_current_object()
+    config = dict(app.config)
+    usuario = current_user.username
+
+    def run():
+        with app.app_context():
+            procesar_seleccionados(config, items, usuario)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+    return {"status": f"Procesando {len(items)} video(s) seleccionado(s)"}, 202
+
+
+@bp.route("/estado")
+def estado():
+    return jsonify({
+        "corriendo": hay_proceso_corriendo(),
+        **(db_service.get_estado_proceso() or {}),
+    })
+
+
+@bp.route("/logs")
+def logs():
+    return jsonify(get_logs())
+
+
+@bp.route("/api/pendientes/<int:carpeta_id>")
+def pendientes(carpeta_id):
+    carpetas = {c["id"]: c for c in db_service.listar_carpetas()}
+    carpeta = carpetas.get(carpeta_id)
+    if not carpeta:
+        return jsonify({"error": "Carpeta no encontrada"}), 404
+
+    try:
+        archivos = listar_archivos(carpeta["drive_folder_id"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    pendientes = []
+    for a in archivos:
+        if db_service.ya_subido(a["id"]):
+            continue
+        sugerido = limpiar_nombre_archivo(a["name"]) or a["name"]
+        pendientes.append({
+            **a,
+            "titulo_sugerido": sugerido[:TITULO_MAX_LEN],
+        })
+
+    return jsonify({"pendientes": pendientes, "titulo_max_len": TITULO_MAX_LEN})
+
+
+# ---------- Carpetas ----------
+
+@bp.route("/carpetas")
+def carpetas():
+    return render_template("carpetas.html", carpetas=db_service.listar_carpetas())
+
+
+@bp.route("/carpetas/agregar", methods=["POST"])
+def carpetas_agregar():
+    nombre = request.form.get("nombre", "").strip()
+    drive_folder_id = request.form.get("drive_folder_id", "").strip()
+
+    if not nombre or not drive_folder_id:
+        flash("Completá el nombre y el ID de la carpeta de Drive.", "error")
+        return redirect(url_for("main.carpetas"))
+
+    try:
+        db_service.agregar_carpeta(nombre, drive_folder_id)
+        flash(f"Carpeta '{nombre}' agregada.", "success")
+    except Exception as e:
+        flash(f"No se pudo agregar la carpeta: {e}", "error")
+
+    return redirect(url_for("main.carpetas"))
+
+
+@bp.route("/carpetas/<int:carpeta_id>/eliminar", methods=["POST"])
+def carpetas_eliminar(carpeta_id):
+    db_service.eliminar_carpeta(carpeta_id)
+    flash("Carpeta eliminada.", "success")
+    return redirect(url_for("main.carpetas"))
+
+
+@bp.route("/carpetas/<int:carpeta_id>/alternar", methods=["POST"])
+def carpetas_alternar(carpeta_id):
+    activo = request.form.get("activo") == "1"
+    db_service.alternar_carpeta(carpeta_id, activo)
+    return redirect(url_for("main.carpetas"))
+
+
+# ---------- Credenciales ----------
+
+@bp.route("/credenciales")
+def credenciales():
+    drive_ok = os.path.exists(current_app.config["SERVICE_ACCOUNT_FILE"])
+    client_secret_ok = os.path.exists(current_app.config["GOOGLE_CLIENT_SECRET"])
+    return render_template(
+        "credenciales.html",
+        drive_ok=drive_ok,
+        client_secret_ok=client_secret_ok,
+        youtube_ok=youtube_esta_autorizado(),
+    )
+
+
+@bp.route("/credenciales/drive", methods=["POST"])
+def credenciales_drive():
+    archivo = request.files.get("archivo")
+    if not archivo or not archivo.filename.endswith(".json"):
+        flash("Subí un archivo .json válido de la cuenta de servicio.", "error")
+        return redirect(url_for("main.credenciales"))
+
+    archivo.save(current_app.config["SERVICE_ACCOUNT_FILE"])
+    flash("Credencial de Google Drive actualizada.", "success")
+    return redirect(url_for("main.credenciales"))
+
+
+@bp.route("/credenciales/client-secret", methods=["POST"])
+def credenciales_client_secret():
+    archivo = request.files.get("archivo")
+    if not archivo or not archivo.filename.endswith(".json"):
+        flash("Subí un archivo .json válido de client secret.", "error")
+        return redirect(url_for("main.credenciales"))
+
+    archivo.save(current_app.config["GOOGLE_CLIENT_SECRET"])
+    flash("Client secret de YouTube actualizado. Ahora podés autorizar el canal.", "success")
+    return redirect(url_for("main.credenciales"))
+
+
+@bp.route("/credenciales/youtube/autorizar")
+def credenciales_youtube_autorizar():
+    redirect_uri = url_for("main.credenciales_youtube_callback", _external=True)
+    try:
+        authorization_url, state = iniciar_autorizacion(redirect_uri)
+    except FileNotFoundError as e:
+        flash(str(e), "error")
+        return redirect(url_for("main.credenciales"))
+
+    session["oauth_state"] = state
+    return redirect(authorization_url)
+
+
+@bp.route("/credenciales/youtube/callback")
+def credenciales_youtube_callback():
+    redirect_uri = url_for("main.credenciales_youtube_callback", _external=True)
+    try:
+        completar_autorizacion(redirect_uri, request.url)
+        flash("Canal de YouTube autorizado correctamente.", "success")
+    except Exception as e:
+        flash(f"No se pudo autorizar el canal: {e}", "error")
+
+    return redirect(url_for("main.credenciales"))

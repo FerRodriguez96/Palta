@@ -1,0 +1,18 @@
+services:
+  palta:
+    build: .
+    container_name: palta
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    volumes:
+      - ./instance:/app/instance
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/estado"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Carpetas · PALTA{% endblock %}
+
+{% block content %}
+<h1>Carpetas de Drive</h1>
+<p class="subtitle">Elegí qué carpetas de Drive se recorren al procesar. Podés desactivar una sin borrarla.</p>
+
+<div class="card">
+    <h2 style="margin-bottom:14px;">Agregar carpeta</h2>
+    <form method="POST" action="{{ url_for('main.carpetas_agregar') }}" class="form-row">
+        <input type="text" name="nombre" placeholder="Nombre (ej: C13/F16)" required>
+        <input type="text" name="drive_folder_id" placeholder="ID de la carpeta de Drive" required>
+        <button type="submit" class="btn btn-primary">Agregar</button>
+    </form>
+</div>
+
+<div class="card">
+    {% if carpetas %}
+    <table>
+        <thead>
+            <tr><th>Nombre</th><th>ID de carpeta</th><th>Estado</th><th></th></tr>
+        </thead>
+        <tbody>
+            {% for c in carpetas %}
+            <tr>
+                <td>{{ c.nombre }}</td>
+                <td class="mono">{{ c.drive_folder_id }}</td>
+                <td>
+                    <span class="badge {{ 'ok' if c.activo else 'falta' }}">{{ 'activa' if c.activo else 'inactiva' }}</span>
+                </td>
+                <td style="text-align:right; white-space:nowrap;">
+                    <form method="POST" action="{{ url_for('main.carpetas_alternar', carpeta_id=c.id) }}" class="inline">
+                        <input type="hidden" name="activo" value="{{ 0 if c.activo else 1 }}">
+                        <button type="submit" class="btn btn-secondary btn-sm">{{ 'Desactivar' if c.activo else 'Activar' }}</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('main.carpetas_eliminar', carpeta_id=c.id) }}" class="inline" onsubmit="return confirm('¿Eliminar esta carpeta de la configuración?');">
+                        <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No hay carpetas configuradas todavía.</div>
+    {% endif %}
+</div>
+{% endblock %}
