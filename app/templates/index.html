@@ -24,22 +24,18 @@
 {% endif %}
 
 <h2>Carpetas configuradas</h2>
+<p class="subtitle" style="margin-top:-10px;">Tocá una carpeta para ver y elegir qué videos subir.</p>
 {% if carpetas %}
 <div class="grid-cards" id="folder-grid">
     {% for c in carpetas %}
-    <div class="folder-card" data-carpeta-id="{{ c.id }}">
+    <button type="button" class="folder-card" data-carpeta-id="{{ c.id }}" disabled>
         <div class="folder-name">{{ c.nombre }}{% if not c.activo %} <span class="badge falta">inactiva</span>{% endif %}</div>
-        <div class="folder-id">{{ c.drive_folder_id }}</div>
-        <button type="button" class="pendientes-count" data-pendientes disabled>Consultando pendientes…</button>
-        <ul class="pendientes-list" data-pendientes-list hidden></ul>
-    </div>
+        <div class="folder-estado" data-pendientes>Consultando pendientes…</div>
+    </button>
     {% endfor %}
 </div>
 
 <div class="action-row">
-    <button class="btn btn-secondary" id="btn-procesar-seleccion" {{ 'disabled' if estado and estado.corriendo }} hidden>
-        Subir seleccionados (<span id="contador-seleccion">0</span>)
-    </button>
     <button class="btn btn-primary" id="btn-procesar" {{ 'disabled' if estado and estado.corriendo }}>
         Procesar todo
     </button>
@@ -56,34 +52,87 @@
 
 <h2>Historial de subidas</h2>
 <div class="card">
-    {% if subidas %}
+    <div class="historial-toolbar">
+        <input type="text" id="historial-buscar" placeholder="Buscar por archivo, carpeta o usuario…">
+    </div>
     <table>
         <thead>
             <tr><th>Archivo</th><th>Carpeta</th><th>Video</th><th>Subido por</th><th>Fecha</th></tr>
         </thead>
-        <tbody id="historial-body">
-            {% for s in subidas %}
-            <tr>
-                <td>{{ s.nombre_archivo }}</td>
-                <td>{{ s.carpeta or '—' }}</td>
-                <td class="mono">
-                    {% if s.youtube_id %}
-                    <a href="https://youtu.be/{{ s.youtube_id }}" target="_blank" rel="noopener">youtu.be/{{ s.youtube_id }}</a>
-                    {% else %}—{% endif %}
-                </td>
-                <td class="mono">{{ s.subido_por or '—' }}</td>
-                <td class="mono">{{ s.fecha_subida }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
+        <tbody id="historial-body"></tbody>
     </table>
-    {% else %}
-    <div class="empty-state">Todavía no se subió ningún video.</div>
-    {% endif %}
+    <div class="empty-state" id="historial-vacio" hidden>No se encontraron resultados.</div>
+    <div class="historial-paginacion">
+        <span id="historial-info"></span>
+        <div style="display:flex; gap:8px;">
+            <button type="button" class="btn btn-secondary btn-sm" id="historial-anterior">Anterior</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="historial-siguiente">Siguiente</button>
+        </div>
+    </div>
 </div>
 
-<h2>Logs</h2>
-<div class="log-panel" id="log-panel"></div>
+<!-- Modal 1: lista de videos pendientes de una carpeta -->
+<div class="modal-overlay" id="modal-lista" hidden>
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-lista-titulo">Videos pendientes</h3>
+            <button type="button" class="modal-close" id="modal-lista-cerrar" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="empty-state" id="modal-lista-cargando">Consultando Drive…</div>
+            <div class="empty-state" id="modal-lista-vacio" hidden>No hay videos pendientes en esta carpeta.</div>
+            <ul class="modal-lista-videos" id="modal-lista-videos" hidden></ul>
+        </div>
+        <div class="modal-footer">
+            <span class="modal-contador" id="modal-lista-contador">0 seleccionados</span>
+            <div style="display:flex; gap:8px;">
+                <button type="button" class="btn btn-secondary" id="modal-lista-cancelar">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="modal-lista-continuar" disabled>Continuar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal 2: configuracion por video (wizard) -->
+<div class="modal-overlay" id="modal-config" hidden>
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Configurar video</h3>
+            <button type="button" class="modal-close" id="modal-config-cerrar" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-original">Nombre original en Drive: <span id="modal-config-original" class="mono"></span></div>
+
+            <label class="modal-label">Título en YouTube (máx. 100 caracteres)
+                <input type="text" id="modal-config-input-titulo" maxlength="100">
+            </label>
+
+            <label class="modal-label">Descripción
+                <textarea id="modal-config-input-descripcion" rows="4" placeholder="Subido automáticamente desde Google Drive"></textarea>
+            </label>
+
+            <label class="modal-label">Privacidad
+                <select id="modal-config-input-privacidad">
+                    <option value="private">Privado</option>
+                    <option value="unlisted">Oculto (con link)</option>
+                    <option value="public">Público</option>
+                </select>
+            </label>
+
+            <label class="modal-label">Miniatura (opcional)
+                <input type="file" id="modal-config-input-miniatura" accept="image/*">
+            </label>
+            <img id="modal-config-preview-miniatura" class="modal-thumb-preview" hidden alt="Vista previa de la miniatura">
+        </div>
+        <div class="modal-footer">
+            <span class="modal-contador" id="modal-config-progreso">Video 1 de 1</span>
+            <div style="display:flex; gap:8px;">
+                <button type="button" class="btn btn-secondary" id="modal-config-anterior">Anterior</button>
+                <button type="button" class="btn btn-primary" id="modal-config-siguiente">Siguiente</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

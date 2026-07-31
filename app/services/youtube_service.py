@@ -115,11 +115,15 @@ def get_youtube_service():
     return build("youtube", "v3", credentials=creds)
 
 
-def subir_video(nombre_archivo, on_progress=None, titulo=None):
+def subir_video(nombre_archivo, on_progress=None, titulo=None, descripcion=None, privacidad=None):
     """Sube un video a YouTube. on_progress(porcentaje:int) es opcional.
-    titulo: título a mostrar en YouTube; si no se pasa, se usa el nombre de archivo."""
+    titulo: titulo a mostrar en YouTube; si no se pasa, se usa el nombre de archivo.
+    descripcion: descripcion del video; si no se pasa, se usa una por defecto.
+    privacidad: 'private' | 'unlisted' | 'public'; si no es valida, se usa 'private'."""
     youtube = get_youtube_service()
     titulo_final = titulo or os.path.basename(nombre_archivo)
+    descripcion_final = descripcion or "Subido automáticamente desde Google Drive"
+    privacidad_final = privacidad if privacidad in ("private", "unlisted", "public") else "private"
 
     try:
         logger.info(f"Subiendo video: {nombre_archivo}")
@@ -127,12 +131,12 @@ def subir_video(nombre_archivo, on_progress=None, titulo=None):
         request_body = {
             "snippet": {
                 "title": titulo_final,
-                "description": "Subido automáticamente desde Google Drive",
+                "description": descripcion_final,
                 "categoryId": "27",
                 "tags": tags,
             },
             "status": {
-                "privacyStatus": "private",
+                "privacyStatus": privacidad_final,
                 "license": "creativeCommon",
                 "madeForKids": False,
                 "selfDeclaredMadeForKids": False,
@@ -168,3 +172,19 @@ def subir_video(nombre_archivo, on_progress=None, titulo=None):
     except Exception as e:
         logger.error(f"❌ Error subiendo video: {e}")
         raise e
+
+
+def subir_miniatura(video_id, ruta_miniatura):
+    """Sube una miniatura personalizada para un video ya subido. No lanza
+    excepción hacia arriba: si falla, se registra el error pero no debe
+    hacer fallar todo el proceso (el video ya quedó subido igual)."""
+    youtube = get_youtube_service()
+    try:
+        logger.info(f"Subiendo miniatura para video {video_id}")
+        youtube.thumbnails().set(
+            videoId=video_id,
+            media_body=MediaFileUpload(ruta_miniatura),
+        ).execute()
+        logger.info(f"✅ Miniatura subida para {video_id}")
+    except Exception as e:
+        logger.error(f"❌ Error subiendo miniatura de {video_id}: {e}")

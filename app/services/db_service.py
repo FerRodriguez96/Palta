@@ -22,15 +22,18 @@ def init_db(db_path):
             nombre_archivo TEXT,
             carpeta TEXT,
             fecha_subida TEXT,
-            subido_por TEXT
+            subido_por TEXT,
+            nombre_original TEXT
         )
     """)
 
-    # Migracion: si la DB ya existia sin la columna subido_por, se agrega.
+    # Migracion: columnas agregadas despues de la version inicial.
     cursor.execute("PRAGMA table_info(uploads)")
     columnas = [fila[1] for fila in cursor.fetchall()]
     if "subido_por" not in columnas:
         cursor.execute("ALTER TABLE uploads ADD COLUMN subido_por TEXT")
+    if "nombre_original" not in columnas:
+        cursor.execute("ALTER TABLE uploads ADD COLUMN nombre_original TEXT")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS carpetas (
@@ -73,13 +76,13 @@ def init_db(db_path):
 
 # ---------- Subidas ----------
 
-def registrar_subida(drive_id, youtube_id, nombre_archivo, carpeta, usuario=None):
+def registrar_subida(drive_id, youtube_id, nombre_archivo, carpeta, usuario=None, nombre_original=None):
     conn = _conn()
     conn.execute(
-        """INSERT OR IGNORE INTO uploads (drive_id, youtube_id, nombre_archivo, carpeta, fecha_subida, subido_por)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+        """INSERT OR IGNORE INTO uploads (drive_id, youtube_id, nombre_archivo, carpeta, fecha_subida, subido_por, nombre_original)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (drive_id, youtube_id, nombre_archivo, carpeta,
-         datetime.now().strftime("%d-%m-%Y %H:%M:%S"), usuario),
+         datetime.now().strftime("%d-%m-%Y %H:%M:%S"), usuario, nombre_original),
     )
     conn.commit()
     conn.close()
@@ -94,15 +97,27 @@ def ya_subido(drive_id):
     return row is not None
 
 
-def listar_subidas(limit=200):
+def listar_subidas(q=None, page=1, per_page=10):
     conn = _conn()
+
+    where = ""
+    params = []
+    if q:
+        where = "WHERE nombre_archivo LIKE ? OR carpeta LIKE ? OR subido_por LIKE ? OR nombre_original LIKE ?"
+        comodin = f"%{q}%"
+        params = [comodin, comodin, comodin, comodin]
+
+    total = conn.execute(f"SELECT COUNT(*) FROM uploads {where}", params).fetchone()[0]
+
+    pagina = max(page, 1)
+    offset = (pagina - 1) * per_page
     rows = conn.execute(
-        """SELECT id, drive_id, youtube_id, nombre_archivo, carpeta, fecha_subida, subido_por
-           FROM uploads ORDER BY id DESC LIMIT ?""",
-        (limit,),
+        f"""SELECT id, drive_id, youtube_id, nombre_archivo, carpeta, fecha_subida, subido_por, nombre_original
+            FROM uploads {where} ORDER BY id DESC LIMIT ? OFFSET ?""",
+        params + [per_page, offset],
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in rows], total
 
 
 # ---------- Carpetas ----------

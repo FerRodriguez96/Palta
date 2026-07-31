@@ -2,7 +2,7 @@ import os
 import threading
 
 from app.services.drive_service import listar_archivos, descargar_archivo, limpiar_nombre_archivo
-from app.services.youtube_service import subir_video, YoutubeAuthRequired
+from app.services.youtube_service import subir_video, subir_miniatura, YoutubeAuthRequired
 from app.services.db_service import (
     ya_subido, registrar_subida, listar_carpetas,
     set_estado_proceso, actualizar_progreso_actual,
@@ -28,17 +28,24 @@ def _emit(evento, data):
         pass
 
 
-def _procesar_un_archivo(nombre_carpeta, drive_id, nombre_drive, download_path, usuario=None, titulo=None):
+def _procesar_un_archivo(nombre_carpeta, drive_id, nombre_drive, download_path, usuario=None,
+                          titulo=None, descripcion=None, privacidad=None, miniatura_path=None):
     """Descarga un video de Drive, lo sube a YouTube, lo registra y notifica.
-    - nombre_drive: nombre tal cual viene de Drive (se usa para armar el nombre
-      de archivo local, siempre saneado).
-    - titulo: titulo elegido a mano por el usuario (opcional). Si no se pasa,
-      se usa el nombre saneado como titulo.
+    - nombre_drive: nombre original tal cual viene de Drive. Se usa para armar
+      el nombre de archivo local (siempre saneado) y se guarda en la DB como
+      referencia, para no perder el rastro del archivo original aunque se
+      haya elegido un titulo distinto para YouTube.
+    - titulo/descripcion/privacidad: metadatos elegidos a mano (opcionales).
+    - miniatura_path: ruta local a una imagen de miniatura ya guardada en disco
+      (opcional). Se sube a YouTube y se borra del disco al terminar, pase lo
+      que pase.
     Devuelve True si se proceso, False si ya estaba subido.
     Lanza YoutubeAuthRequired si hay que re-autorizar el canal."""
 
     if ya_subido(drive_id):
         logger.info(f"Ya subido: {nombre_drive}")
+        if miniatura_path and os.path.exists(miniatura_path):
+            os.remove(miniatura_path)
         return False
 
     # El nombre que da Drive puede traer "/" (formato de fecha) y otros
@@ -67,12 +74,21 @@ def _procesar_un_archivo(nombre_carpeta, drive_id, nombre_drive, download_path, 
 
         _emit("progreso", {"carpeta": nombre_carpeta, "archivo": titulo_final,
                             "etapa": "subiendo", "porcentaje": 0})
-        youtube_id = subir_video(ruta_local, on_progress=_on_subida, titulo=titulo_final)
+        youtube_id = subir_video(
+            ruta_local, on_progress=_on_subida,
+            titulo=titulo_final, descripcion=descripcion, privacidad=privacidad,
+        )
 
-        # 3. Registrar en DB
-        registrar_subida(drive_id, youtube_id, titulo_final, nombre_carpeta, usuario)
+        # 3. Miniatura personalizada (opcional, no debe romper el proceso si falla)
+        if miniatura_path and os.path.exists(miniatura_path):
+            _emit("progreso", {"carpeta": nombre_carpeta, "archivo": titulo_final,
+                                "etapa": "miniatura", "porcentaje": 100})
+            subir_miniatura(youtube_id, miniatura_path)
 
-        # 4. Notificar por mail (no bloquea el proceso si falla)
+        # 4. Registrar en DB (guarda tambien el nombre original de Drive)
+        registrar_subida(drive_id, youtube_id, titulo_final, nombre_carpeta, usuario, nombre_drive)
+
+        # 5. Notificar por mail (no bloquea el proceso si falla)
         try:
             enviar_notificacion_si_nuevo(
                 titulo_final, f"https://www.youtube.com/watch?v={youtube_id}"
@@ -82,7 +98,7 @@ def _procesar_un_archivo(nombre_carpeta, drive_id, nombre_drive, download_path, 
 
         _emit("subido", {
             "carpeta": nombre_carpeta, "archivo": titulo_final,
-            "youtube_id": youtube_id, "usuario": usuario,
+            "youtube_id": youtube_id, "usuario": usuario, "nombre_original": nombre_drive,
         })
 
         logger.info(f"Proceso completo OK: {titulo_final}")
@@ -99,6 +115,8 @@ def _procesar_un_archivo(nombre_carpeta, drive_id, nombre_drive, download_path, 
     finally:
         if os.path.exists(ruta_local):
             os.remove(ruta_local)
+        if miniatura_path and os.path.exists(miniatura_path):
+            os.remove(miniatura_path)
 
 
 def procesar_videos(config, usuario=None):
@@ -161,7 +179,9 @@ def procesar_videos(config, usuario=None):
 
 def procesar_seleccionados(config, items, usuario=None):
     """Procesa solo los videos elegidos manualmente por el usuario.
-    items: lista de dicts {"carpeta": nombre_carpeta, "drive_id": ..., "nombre": ..., "titulo": ...}
+    items: lista de dicts {"carpeta", "drive_id", "nombre", "titulo",
+    "descripcion", "privacidad", "miniatura_path"}. Todos menos carpeta,
+    drive_id y nombre son opcionales.
     Solo puede haber una ejecucion a la vez (controlado por proceso_lock)."""
 
     if not proceso_lock.acquire(blocking=False):
@@ -185,7 +205,11 @@ def procesar_seleccionados(config, items, usuario=None):
             try:
                 _procesar_un_archivo(
                     item["carpeta"], item["drive_id"], item["nombre"], download_path,
-                    usuario, item.get("titulo"),
+                    usuario,
+                    titulo=item.get("titulo"),
+                    descripcion=item.get("descripcion"),
+                    privacidad=item.get("privacidad"),
+                    miniatura_path=item.get("miniatura_path"),
                 )
             except YoutubeAuthRequired as e:
                 logger.error(f"{e}")

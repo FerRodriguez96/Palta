@@ -135,10 +135,9 @@ def usuarios_eliminar(user_id):
 @bp.route("/")
 def index():
     carpetas = db_service.listar_carpetas()
-    subidas = db_service.listar_subidas(limit=50)
     estado = db_service.get_estado_proceso()
     return render_template(
-        "index.html", carpetas=carpetas, subidas=subidas, estado=estado,
+        "index.html", carpetas=carpetas, estado=estado,
         youtube_ok=youtube_esta_autorizado(),
         drive_ok=os.path.exists(current_app.config["SERVICE_ACCOUNT_FILE"]),
     )
@@ -168,27 +167,47 @@ def procesar_seleccion():
     if hay_proceso_corriendo():
         return {"status": "Ya hay un procesamiento en curso"}, 409
 
-    payload = request.get_json(silent=True) or {}
-    items_entrantes = payload.get("items", [])
+    import json as _json
 
-    if not items_entrantes:
+    items_raw = request.form.get("items")
+    if not items_raw:
         return {"status": "No se seleccionó ningún video"}, 400
 
+    try:
+        items_entrantes = _json.loads(items_raw)
+    except Exception:
+        return {"status": "Formato de selección inválido"}, 400
+
     carpetas = {c["id"]: c for c in db_service.listar_carpetas()}
+    download_path = current_app.config["DOWNLOAD_PATH"]
+    os.makedirs(download_path, exist_ok=True)
+
     items = []
     for it in items_entrantes:
         carpeta = carpetas.get(it.get("carpeta_id"))
         if not carpeta or not it.get("drive_id") or not it.get("nombre"):
             continue
 
-        titulo = (it.get("titulo") or "").strip()
-        titulo = titulo[:TITULO_MAX_LEN] if titulo else None
+        titulo = (it.get("titulo") or "").strip()[:TITULO_MAX_LEN] or None
+        descripcion = (it.get("descripcion") or "").strip()[:5000] or None
+        privacidad = it.get("privacidad") if it.get("privacidad") in ("private", "unlisted", "public") else "private"
+
+        miniatura_path = None
+        archivo = request.files.get(f"thumbnail_{it['drive_id']}")
+        if archivo and archivo.filename:
+            extension = os.path.splitext(archivo.filename)[1] or ".jpg"
+            nombre_seguro = f"thumb-{abs(hash(it['drive_id']))}{extension}"
+            miniatura_path = os.path.join(download_path, nombre_seguro)
+            archivo.save(miniatura_path)
 
         items.append({
             "carpeta": carpeta["nombre"],
             "drive_id": it["drive_id"],
             "nombre": it["nombre"],
             "titulo": titulo,
+            "descripcion": descripcion,
+            "privacidad": privacidad,
+            "miniatura_path": miniatura_path,
         })
 
     if not items:
@@ -216,9 +235,31 @@ def estado():
     })
 
 
+@bp.route("/api/subidas")
+def api_subidas():
+    q = request.args.get("q", "").strip()
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+    except (TypeError, ValueError):
+        page = 1
+    per_page = 10
+
+    items, total = db_service.listar_subidas(q=q or None, page=page, per_page=per_page)
+    pages = max((total + per_page - 1) // per_page, 1)
+
+    return jsonify({
+        "items": items, "total": total, "page": page, "per_page": per_page, "pages": pages,
+    })
+
+
+@bp.route("/api/logs")
+def api_logs():
+    return jsonify(get_logs())
+
+
 @bp.route("/logs")
 def logs():
-    return jsonify(get_logs())
+    return render_template("logs.html")
 
 
 @bp.route("/api/pendientes/<int:carpeta_id>")

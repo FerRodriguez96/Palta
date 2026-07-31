@@ -26,6 +26,7 @@
                 <a href="{{ url_for('main.carpetas') }}" class="{{ 'active' if request.endpoint == 'main.carpetas' }}">Carpetas</a>
                 <a href="{{ url_for('main.credenciales') }}" class="{{ 'active' if request.endpoint == 'main.credenciales' }}">Credenciales</a>
                 <a href="{{ url_for('main.usuarios') }}" class="{{ 'active' if request.endpoint == 'main.usuarios' }}">Usuarios</a>
+                <a href="{{ url_for('main.logs') }}" class="{{ 'active' if request.endpoint == 'main.logs' }}">Logs</a>
             </nav>
             <div class="sidebar-user">
                 {% if current_user.is_authenticated %}
@@ -53,6 +54,8 @@
             {% block content %}{% endblock %}
         </main>
     </div>
+
+    <div class="toast-stack" id="toast-stack"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
