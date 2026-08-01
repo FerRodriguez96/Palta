@@ -1,4 +1,6 @@
 import threading
+import json
+import re
 from flask import Blueprint, render_template, jsonify, current_app, request, redirect, url_for, session, flash
 from flask_login import (
     login_user, logout_user, login_required, current_user,
@@ -14,10 +16,37 @@ from app.services.youtube_service import (
 )
 from app.models import User
 import os
+import re
+import json
+from functools import wraps
 
 bp = Blueprint("main", __name__)
 
 TITULO_MAX_LEN = 100
+
+
+def admin_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            flash("No tenés permisos para acceder a esa sección.", "error")
+            return redirect(url_for("main.index"))
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def _extraer_id_carpeta(valor):
+    """Acepta tanto un ID de carpeta de Drive suelto como una URL completa
+    (ej: https://drive.google.com/drive/folders/<id>?usp=sharing) y devuelve
+    solo el ID."""
+    valor = (valor or "").strip()
+    match = re.search(r"/folders/([a-zA-Z0-9_-]+)", valor)
+    if match:
+        return match.group(1)
+    match = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", valor)
+    if match:
+        return match.group(1)
+    return valor
 
 
 # ---------- Autenticacion ----------
@@ -53,7 +82,7 @@ def setup():
             flash("Completá usuario y contraseña.", "error")
             return redirect(url_for("main.setup"))
 
-        db_service.crear_usuario(username, generate_password_hash(password), nombre_completo)
+        db_service.crear_usuario(username, generate_password_hash(password), nombre_completo, es_admin=True)
         flash("Cuenta creada. Ya podés iniciar sesión.", "success")
         return redirect(url_for("main.login"))
 
@@ -94,16 +123,19 @@ def logout():
 
 @bp.route("/usuarios")
 @login_required
+@admin_required
 def usuarios():
     return render_template("usuarios.html", usuarios=db_service.listar_usuarios())
 
 
 @bp.route("/usuarios/agregar", methods=["POST"])
 @login_required
+@admin_required
 def usuarios_agregar():
     username = request.form.get("username", "").strip().lower()
     nombre_completo = request.form.get("nombre_completo", "").strip()
     password = request.form.get("password", "")
+    es_admin = request.form.get("es_admin") == "1"
 
     if not username or not password:
         flash("Completá usuario y contraseña.", "error")
@@ -113,13 +145,14 @@ def usuarios_agregar():
         flash("Ya existe un usuario con ese nombre.", "error")
         return redirect(url_for("main.usuarios"))
 
-    db_service.crear_usuario(username, generate_password_hash(password), nombre_completo)
+    db_service.crear_usuario(username, generate_password_hash(password), nombre_completo, es_admin=es_admin)
     flash(f"Usuario '{username}' creado.", "success")
     return redirect(url_for("main.usuarios"))
 
 
 @bp.route("/usuarios/<int:user_id>/eliminar", methods=["POST"])
 @login_required
+@admin_required
 def usuarios_eliminar(user_id):
     if str(user_id) == current_user.id:
         flash("No podés eliminar tu propio usuario mientras estás conectado con él.", "error")
@@ -128,6 +161,61 @@ def usuarios_eliminar(user_id):
     db_service.eliminar_usuario(user_id)
     flash("Usuario eliminado.", "success")
     return redirect(url_for("main.usuarios"))
+
+
+@bp.route("/usuarios/<int:user_id>/alternar-admin", methods=["POST"])
+@login_required
+@admin_required
+def usuarios_alternar_admin(user_id):
+    nuevo_valor = request.form.get("es_admin") == "1"
+
+    if str(user_id) == current_user.id and not nuevo_valor:
+        flash("No podés quitarte el rol de administrador a vos mismo.", "error")
+        return redirect(url_for("main.usuarios"))
+
+    db_service.alternar_admin(user_id, nuevo_valor)
+    flash("Permisos actualizados.", "success")
+    return redirect(url_for("main.usuarios"))
+
+
+@bp.route("/usuarios/<int:user_id>/restablecer-password", methods=["POST"])
+@login_required
+@admin_required
+def usuarios_restablecer_password(user_id):
+    nueva_password = request.form.get("nueva_password", "")
+    if len(nueva_password) < 4:
+        flash("La contraseña nueva debe tener al menos 4 caracteres.", "error")
+        return redirect(url_for("main.usuarios"))
+
+    db_service.actualizar_password(user_id, generate_password_hash(nueva_password))
+    flash("Contraseña restablecida.", "success")
+    return redirect(url_for("main.usuarios"))
+
+
+# ---------- Mi cuenta ----------
+
+@bp.route("/cuenta", methods=["GET", "POST"])
+@login_required
+def cuenta():
+    if request.method == "POST":
+        actual = request.form.get("password_actual", "")
+        nueva = request.form.get("password_nueva", "")
+        confirmar = request.form.get("password_confirmar", "")
+
+        fila = db_service.obtener_usuario_por_id(current_user.id)
+
+        if not fila or not check_password_hash(fila["password_hash"], actual):
+            flash("La contraseña actual no es correcta.", "error")
+        elif len(nueva) < 4:
+            flash("La contraseña nueva debe tener al menos 4 caracteres.", "error")
+        elif nueva != confirmar:
+            flash("La confirmación no coincide con la contraseña nueva.", "error")
+        else:
+            db_service.actualizar_password(current_user.id, generate_password_hash(nueva))
+            flash("Contraseña actualizada.", "success")
+            return redirect(url_for("main.cuenta"))
+
+    return render_template("cuenta.html")
 
 
 # ---------- Dashboard ----------
@@ -252,6 +340,14 @@ def api_subidas():
     })
 
 
+@bp.route("/api/cuota")
+def api_cuota():
+    return jsonify({
+        "usados": db_service.contar_subidas_hoy(),
+        "limite": current_app.config["YOUTUBE_DAILY_UPLOAD_LIMIT"],
+    })
+
+
 @bp.route("/api/logs")
 def api_logs():
     return jsonify(get_logs())
@@ -297,10 +393,10 @@ def carpetas():
 @bp.route("/carpetas/agregar", methods=["POST"])
 def carpetas_agregar():
     nombre = request.form.get("nombre", "").strip()
-    drive_folder_id = request.form.get("drive_folder_id", "").strip()
+    drive_folder_id = _extraer_id_carpeta(request.form.get("drive_folder_id", ""))
 
     if not nombre or not drive_folder_id:
-        flash("Completá el nombre y el ID de la carpeta de Drive.", "error")
+        flash("Completá el nombre y el ID o URL de la carpeta de Drive.", "error")
         return redirect(url_for("main.carpetas"))
 
     try:
@@ -329,6 +425,8 @@ def carpetas_alternar(carpeta_id):
 # ---------- Credenciales ----------
 
 @bp.route("/credenciales")
+@login_required
+@admin_required
 def credenciales():
     drive_ok = os.path.exists(current_app.config["SERVICE_ACCOUNT_FILE"])
     client_secret_ok = os.path.exists(current_app.config["GOOGLE_CLIENT_SECRET"])
@@ -341,30 +439,71 @@ def credenciales():
 
 
 @bp.route("/credenciales/drive", methods=["POST"])
+@login_required
+@admin_required
 def credenciales_drive():
     archivo = request.files.get("archivo")
     if not archivo or not archivo.filename.endswith(".json"):
         flash("Subí un archivo .json válido de la cuenta de servicio.", "error")
         return redirect(url_for("main.credenciales"))
 
-    archivo.save(current_app.config["SERVICE_ACCOUNT_FILE"])
-    flash("Credencial de Google Drive actualizada.", "success")
+    contenido = archivo.read()
+    try:
+        datos = json.loads(contenido)
+    except Exception:
+        flash("Ese archivo no es un JSON válido.", "error")
+        return redirect(url_for("main.credenciales"))
+
+    if datos.get("type") != "service_account" or not datos.get("client_email"):
+        flash(
+            "Ese JSON no parece ser una cuenta de servicio de Google (falta "
+            "'type: service_account' o 'client_email'). Revisá que sea el archivo correcto.",
+            "error",
+        )
+        return redirect(url_for("main.credenciales"))
+
+    with open(current_app.config["SERVICE_ACCOUNT_FILE"], "wb") as f:
+        f.write(contenido)
+
+    flash(f"Credencial de Google Drive actualizada ({datos['client_email']}).", "success")
     return redirect(url_for("main.credenciales"))
 
 
 @bp.route("/credenciales/client-secret", methods=["POST"])
+@login_required
+@admin_required
 def credenciales_client_secret():
     archivo = request.files.get("archivo")
     if not archivo or not archivo.filename.endswith(".json"):
         flash("Subí un archivo .json válido de client secret.", "error")
         return redirect(url_for("main.credenciales"))
 
-    archivo.save(current_app.config["GOOGLE_CLIENT_SECRET"])
+    contenido = archivo.read()
+    try:
+        datos = json.loads(contenido)
+    except Exception:
+        flash("Ese archivo no es un JSON válido.", "error")
+        return redirect(url_for("main.credenciales"))
+
+    bloque = datos.get("web") or datos.get("installed")
+    if not bloque or not bloque.get("client_id") or not bloque.get("client_secret"):
+        flash(
+            "Ese JSON no parece ser una credencial OAuth de Google (falta 'client_id' "
+            "o 'client_secret' dentro de 'web'/'installed'). Revisá que sea el archivo correcto.",
+            "error",
+        )
+        return redirect(url_for("main.credenciales"))
+
+    with open(current_app.config["GOOGLE_CLIENT_SECRET"], "wb") as f:
+        f.write(contenido)
+
     flash("Client secret de YouTube actualizado. Ahora podés autorizar el canal.", "success")
     return redirect(url_for("main.credenciales"))
 
 
 @bp.route("/credenciales/youtube/autorizar")
+@login_required
+@admin_required
 def credenciales_youtube_autorizar():
     redirect_uri = url_for("main.credenciales_youtube_callback", _external=True)
     try:
@@ -378,6 +517,8 @@ def credenciales_youtube_autorizar():
 
 
 @bp.route("/credenciales/youtube/callback")
+@login_required
+@admin_required
 def credenciales_youtube_callback():
     redirect_uri = url_for("main.credenciales_youtube_callback", _external=True)
     try:

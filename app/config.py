@@ -37,5 +37,11 @@ class Config:
         if r.strip()
     ]
 
+    # Limite diario de subidas a YouTube. El tope real de Google es de
+    # aproximadamente 100 llamadas videos.insert por dia (por proyecto de
+    # Google Cloud, compartido entre todos los usuarios de esta app). Se deja
+    # un margen de seguridad por defecto (90) para no quedar exactos al limite.
+    YOUTUBE_DAILY_UPLOAD_LIMIT = int(os.getenv("YOUTUBE_DAILY_UPLOAD_LIMIT", "90"))
+
     # Debug
     DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"

@@ -7,6 +7,7 @@ class User(UserMixin):
         self.id = str(row["id"])
         self.username = row["username"]
         self.nombre_completo = row["nombre_completo"] or row["username"]
+        self.is_admin = bool(row["es_admin"])
 
     @staticmethod
     def get(user_id):

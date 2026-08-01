@@ -7,9 +7,14 @@
         <h1>Panel de subidas</h1>
         <p class="subtitle">Descarga videos desde carpetas de Drive y los sube al canal de YouTube.</p>
     </div>
-    <span class="status-pill {{ 'corriendo' if estado and estado.corriendo }}" id="estado-pill">
-        <span id="estado-texto">{{ 'Procesando…' if estado and estado.corriendo else 'En espera' }}</span>
-    </span>
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <span class="status-pill {{ 'corriendo' if estado and estado.corriendo }}" id="estado-pill">
+            <span id="estado-texto">{{ 'Procesando…' if estado and estado.corriendo else 'En espera' }}</span>
+        </span>
+        <span class="status-pill" id="cuota-pill">
+            <span id="cuota-texto">Cuota YouTube: —</span>
+        </span>
+    </div>
 </div>
 
 {% if not drive_ok or not youtube_ok %}
@@ -129,6 +134,25 @@
             <div style="display:flex; gap:8px;">
                 <button type="button" class="btn btn-secondary" id="modal-config-anterior">Anterior</button>
                 <button type="button" class="btn btn-primary" id="modal-config-siguiente">Siguiente</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal generico: confirmaciones -->
+<div class="modal-overlay" id="modal-confirmar" hidden>
+    <div class="modal" style="max-width:420px;">
+        <div class="modal-header">
+            <h3 id="modal-confirmar-titulo">Confirmar</h3>
+            <button type="button" class="modal-close" id="modal-confirmar-cerrar" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p id="modal-confirmar-mensaje" style="color:var(--texto); font-size:0.9rem; line-height:1.5; margin:0;"></p>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end;">
+            <div style="display:flex; gap:8px;">
+                <button type="button" class="btn btn-secondary" id="modal-confirmar-cancelar">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="modal-confirmar-aceptar">Confirmar</button>
             </div>
         </div>
     </div>

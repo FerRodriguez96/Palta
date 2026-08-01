@@ -24,13 +24,16 @@
             <nav class="nav">
                 <a href="{{ url_for('main.index') }}" class="{{ 'active' if request.endpoint == 'main.index' }}">Panel</a>
                 <a href="{{ url_for('main.carpetas') }}" class="{{ 'active' if request.endpoint == 'main.carpetas' }}">Carpetas</a>
+                {% if current_user.is_authenticated and current_user.is_admin %}
                 <a href="{{ url_for('main.credenciales') }}" class="{{ 'active' if request.endpoint == 'main.credenciales' }}">Credenciales</a>
                 <a href="{{ url_for('main.usuarios') }}" class="{{ 'active' if request.endpoint == 'main.usuarios' }}">Usuarios</a>
+                {% endif %}
                 <a href="{{ url_for('main.logs') }}" class="{{ 'active' if request.endpoint == 'main.logs' }}">Logs</a>
             </nav>
             <div class="sidebar-user">
                 {% if current_user.is_authenticated %}
                 <span>{{ current_user.nombre_completo }}</span>
+                <a href="{{ url_for('main.cuenta') }}">Mi cuenta</a>
                 <a href="{{ url_for('main.logout') }}">Cerrar sesión</a>
                 {% endif %}
             </div>

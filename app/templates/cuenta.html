@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Mi cuenta · PALTA{% endblock %}
+
+{% block content %}
+<h1>Mi cuenta</h1>
+<p class="subtitle">{{ current_user.nombre_completo }} · usuario: <span class="mono">{{ current_user.username }}</span></p>
+
+<div class="card" style="max-width:420px;">
+    <h2 style="margin-bottom:14px;">Cambiar contraseña</h2>
+    <form method="POST">
+        <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:16px;">
+            <label style="font-size:0.82rem; color:var(--texto-tenue); display:flex; flex-direction:column; gap:6px;">
+                Contraseña actual
+                <input type="password" name="password_actual" required
+                    style="background:var(--panel-alto); border:1px solid var(--borde); border-radius:var(--radio); padding:9px 12px; color:var(--texto);">
+            </label>
+            <label style="font-size:0.82rem; color:var(--texto-tenue); display:flex; flex-direction:column; gap:6px;">
+                Contraseña nueva
+                <input type="password" name="password_nueva" required
+                    style="background:var(--panel-alto); border:1px solid var(--borde); border-radius:var(--radio); padding:9px 12px; color:var(--texto);">
+            </label>
+            <label style="font-size:0.82rem; color:var(--texto-tenue); display:flex; flex-direction:column; gap:6px;">
+                Confirmar contraseña nueva
+                <input type="password" name="password_confirmar" required
+                    style="background:var(--panel-alto); border:1px solid var(--borde); border-radius:var(--radio); padding:9px 12px; color:var(--texto);">
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Actualizar contraseña</button>
+    </form>
+</div>
+{% endblock %}

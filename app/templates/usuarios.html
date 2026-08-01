@@ -3,14 +3,20 @@
 
 {% block content %}
 <h1>Usuarios</h1>
-<p class="subtitle">Cada persona que dispare una subida queda identificada con su usuario en el historial. No hay roles: todos los usuarios tienen los mismos permisos.</p>
+<p class="subtitle">Los administradores pueden gestionar usuarios y credenciales. El resto solo ve el Panel, Carpetas y Logs.</p>
 
 <div class="card">
     <h2 style="margin-bottom:14px;">Agregar usuario</h2>
-    <form method="POST" action="{{ url_for('main.usuarios_agregar') }}" class="form-row">
-        <input type="text" name="username" placeholder="Usuario (ej: fernando)" required>
-        <input type="text" name="nombre_completo" placeholder="Nombre y apellido (opcional)">
-        <input type="password" name="password" placeholder="Contraseña" required>
+    <form method="POST" action="{{ url_for('main.usuarios_agregar') }}">
+        <div class="form-row">
+            <input type="text" name="username" placeholder="Usuario (ej: fernando)" required>
+            <input type="text" name="nombre_completo" placeholder="Nombre y apellido (opcional)">
+            <input type="password" name="password" placeholder="Contraseña" required>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--texto-tenue); margin-bottom:14px;">
+            <input type="checkbox" name="es_admin" value="1">
+            Es administrador (puede gestionar credenciales y usuarios)
+        </label>
         <button type="submit" class="btn btn-primary">Agregar</button>
     </form>
 </div>
@@ -19,17 +25,35 @@
     {% if usuarios %}
     <table>
         <thead>
-            <tr><th>Usuario</th><th>Nombre</th><th>Creado</th><th></th></tr>
+            <tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Creado</th><th></th></tr>
         </thead>
         <tbody>
             {% for u in usuarios %}
             <tr>
                 <td class="mono">{{ u.username }}</td>
                 <td>{{ u.nombre_completo or '—' }}</td>
+                <td><span class="badge {{ 'ok' if u.es_admin else 'falta' }}">{{ 'Administrador' if u.es_admin else 'Usuario' }}</span></td>
                 <td class="mono">{{ u.creado_en or '—' }}</td>
-                <td style="text-align:right;">
+                <td style="text-align:right; white-space:nowrap;">
+                    <form method="POST" action="{{ url_for('main.usuarios_alternar_admin', user_id=u.id) }}" class="inline">
+                        <input type="hidden" name="es_admin" value="{{ 0 if u.es_admin else 1 }}">
+                        <button type="submit" class="btn btn-secondary btn-sm">
+                            {{ 'Quitar admin' if u.es_admin else 'Hacer admin' }}
+                        </button>
+                    </form>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('reset-{{ u.id }}').hidden = !document.getElementById('reset-{{ u.id }}').hidden;">
+                        Restablecer contraseña
+                    </button>
                     <form method="POST" action="{{ url_for('main.usuarios_eliminar', user_id=u.id) }}" class="inline" onsubmit="return confirm('¿Eliminar este usuario?');">
                         <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            <tr id="reset-{{ u.id }}" hidden>
+                <td colspan="5">
+                    <form method="POST" action="{{ url_for('main.usuarios_restablecer_password', user_id=u.id) }}" class="form-row" style="margin:6px 0 0;">
+                        <input type="password" name="nueva_password" placeholder="Nueva contraseña para {{ u.username }}" required minlength="4">
+                        <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
                     </form>
                 </td>
             </tr>

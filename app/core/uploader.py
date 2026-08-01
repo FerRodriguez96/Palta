@@ -5,7 +5,7 @@ from app.services.drive_service import listar_archivos, descargar_archivo, limpi
 from app.services.youtube_service import subir_video, subir_miniatura, YoutubeAuthRequired
 from app.services.db_service import (
     ya_subido, registrar_subida, listar_carpetas,
-    set_estado_proceso, actualizar_progreso_actual,
+    set_estado_proceso, actualizar_progreso_actual, contar_subidas_hoy,
 )
 from app.services.mailer_service import enviar_notificacion_si_nuevo
 from app.utils.logger_utils import configurar_logger
@@ -26,6 +26,20 @@ def _emit(evento, data):
         socketio.emit(evento, data)
     except Exception:
         pass
+
+
+def _cupo_agotado(config):
+    limite = config.get("YOUTUBE_DAILY_UPLOAD_LIMIT", 90)
+    usados = contar_subidas_hoy()
+    if usados >= limite:
+        mensaje = (
+            f"Se alcanzó el límite diario de subidas a YouTube ({usados}/{limite}). "
+            "El resto queda pendiente para cuando se reinicie la cuota (medianoche hora Pacífico)."
+        )
+        logger.warning(mensaje)
+        _emit("error", {"mensaje": mensaje})
+        return True
+    return False
 
 
 def _procesar_un_archivo(nombre_carpeta, drive_id, nombre_drive, download_path, usuario=None,
@@ -162,6 +176,8 @@ def procesar_videos(config, usuario=None):
                 continue
 
             for video in videos:
+                if _cupo_agotado(config):
+                    return True
                 try:
                     _procesar_un_archivo(nombre_carpeta, video["id"], video["name"], download_path, usuario)
                 except YoutubeAuthRequired as e:
@@ -202,6 +218,8 @@ def procesar_seleccionados(config, items, usuario=None):
         logger.info(f"Procesando {len(items)} video(s) seleccionado(s) manualmente.")
 
         for item in items:
+            if _cupo_agotado(config):
+                return True
             try:
                 _procesar_un_archivo(
                     item["carpeta"], item["drive_id"], item["nombre"], download_path,

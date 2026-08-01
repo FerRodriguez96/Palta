@@ -39,21 +39,60 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // ---- Confirmaciones genericas ----
+    const modalConfirmar = document.getElementById("modal-confirmar");
+    const modalConfirmarTitulo = document.getElementById("modal-confirmar-titulo");
+    const modalConfirmarMensaje = document.getElementById("modal-confirmar-mensaje");
+    const modalConfirmarCancelar = document.getElementById("modal-confirmar-cancelar");
+    const modalConfirmarAceptar = document.getElementById("modal-confirmar-aceptar");
+    const modalConfirmarCerrar = document.getElementById("modal-confirmar-cerrar");
+    let confirmarCallback = null;
+
+    function mostrarConfirmacion(titulo, mensaje, callback) {
+        if (!modalConfirmar) { callback(); return; }
+        modalConfirmarTitulo.textContent = titulo;
+        modalConfirmarMensaje.textContent = mensaje;
+        confirmarCallback = callback;
+        modalConfirmar.hidden = false;
+    }
+
+    function cerrarModalConfirmar() {
+        if (modalConfirmar) modalConfirmar.hidden = true;
+        confirmarCallback = null;
+    }
+
+    if (modalConfirmarCancelar) modalConfirmarCancelar.addEventListener("click", cerrarModalConfirmar);
+    if (modalConfirmarCerrar) modalConfirmarCerrar.addEventListener("click", cerrarModalConfirmar);
+    if (modalConfirmarAceptar) modalConfirmarAceptar.addEventListener("click", () => {
+        const cb = confirmarCallback;
+        cerrarModalConfirmar();
+        if (cb) cb();
+    });
+
     // ---- Botón procesar todo ----
-    if (btnProcesar) {
-        btnProcesar.addEventListener("click", async () => {
-            btnProcesar.disabled = true;
-            try {
-                const res = await fetch("/procesar", { method: "POST" });
-                if (!res.ok && res.status !== 202) {
-                    const data = await res.json().catch(() => ({}));
-                    alert(data.status || "No se pudo iniciar el procesamiento.");
-                    btnProcesar.disabled = false;
-                }
-            } catch (e) {
-                alert("Error de red al iniciar el procesamiento.");
+    let totalPendientesGlobal = 0;
+
+    async function ejecutarProcesarTodo() {
+        btnProcesar.disabled = true;
+        try {
+            const res = await fetch("/procesar", { method: "POST" });
+            if (!res.ok && res.status !== 202) {
+                const data = await res.json().catch(() => ({}));
+                alert(data.status || "No se pudo iniciar el procesamiento.");
                 btnProcesar.disabled = false;
             }
+        } catch (e) {
+            alert("Error de red al iniciar el procesamiento.");
+            btnProcesar.disabled = false;
+        }
+    }
+
+    if (btnProcesar) {
+        btnProcesar.addEventListener("click", () => {
+            const mensaje = totalPendientesGlobal > 0
+                ? `Se van a procesar ${totalPendientesGlobal} video${totalPendientesGlobal === 1 ? "" : "s"} pendiente${totalPendientesGlobal === 1 ? "" : "s"} de todas las carpetas activas. ¿Confirmás?`
+                : "No se detectaron videos pendientes en este momento, pero el proceso igual se puede disparar. ¿Confirmás?";
+            mostrarConfirmacion("Procesar todas las carpetas", mensaje, ejecutarProcesarTodo);
         });
     }
 
@@ -69,6 +108,27 @@ document.addEventListener("DOMContentLoaded", () => {
             if (btnProcesar) btnProcesar.disabled = false;
         }
     });
+
+    // ---- Cuota diaria de YouTube ----
+    const cuotaPill = document.getElementById("cuota-pill");
+    const cuotaTexto = document.getElementById("cuota-texto");
+
+    function cargarCuota() {
+        if (!cuotaTexto) return;
+        fetch("/api/cuota")
+            .then(r => r.json())
+            .then(data => {
+                cuotaTexto.textContent = `Cuota YouTube: ${data.usados}/${data.limite} hoy`;
+                cuotaPill.classList.remove("cuota-alerta", "cuota-agotada");
+                if (data.usados >= data.limite) {
+                    cuotaPill.classList.add("cuota-agotada");
+                } else if (data.usados >= data.limite * 0.8) {
+                    cuotaPill.classList.add("cuota-alerta");
+                }
+            })
+            .catch(() => { cuotaTexto.textContent = "Cuota YouTube: no disponible"; });
+    }
+    cargarCuota();
 
     // ---- Logs ----
     if (logPanel) {
@@ -130,6 +190,7 @@ document.addEventListener("DOMContentLoaded", () => {
         delete progresos[key];
         renderProgreso();
         cargarHistorial();
+        cargarCuota();
         mostrarToast("success", `✅ Video subido: ${data.archivo}`);
     });
 
@@ -379,6 +440,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const n = data.pendientes.length;
                 estadoEl.textContent = n === 0 ? "Sin videos pendientes" : `${n} video${n === 1 ? "" : "s"} pendiente${n === 1 ? "" : "s"}`;
                 card.disabled = n === 0;
+                totalPendientesGlobal += n;
             })
             .catch(() => {
                 estadoEl.textContent = "No se pudo consultar Drive";
@@ -521,7 +583,19 @@ document.addEventListener("DOMContentLoaded", () => {
         wizardIndex = 0;
     }
 
-    if (modalConfigCerrar) modalConfigCerrar.addEventListener("click", cerrarModalConfig);
+    function pedirCierreModalConfig() {
+        if (wizardOrden.length === 0) {
+            cerrarModalConfig();
+            return;
+        }
+        mostrarConfirmacion(
+            "Cancelar configuración",
+            "Vas a perder el título, descripción, privacidad y miniatura que cargaste para estos videos. ¿Seguro que querés cerrar sin subir nada?",
+            cerrarModalConfig,
+        );
+    }
+
+    if (modalConfigCerrar) modalConfigCerrar.addEventListener("click", pedirCierreModalConfig);
 
     if (modalListaContinuar) modalListaContinuar.addEventListener("click", iniciarWizard);
 
@@ -565,7 +639,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Cerrar modales con Escape
     document.addEventListener("keydown", (e) => {
         if (e.key !== "Escape") return;
-        if (modalConfig && !modalConfig.hidden) cerrarModalConfig();
+        if (modalConfirmar && !modalConfirmar.hidden) cerrarModalConfirmar();
+        else if (modalConfig && !modalConfig.hidden) pedirCierreModalConfig();
         else if (modalLista && !modalLista.hidden) cerrarModalLista();
     });
 });

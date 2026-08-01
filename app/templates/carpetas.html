@@ -9,7 +9,7 @@
     <h2 style="margin-bottom:14px;">Agregar carpeta</h2>
     <form method="POST" action="{{ url_for('main.carpetas_agregar') }}" class="form-row">
         <input type="text" name="nombre" placeholder="Nombre (ej: C13/F16)" required>
-        <input type="text" name="drive_folder_id" placeholder="ID de la carpeta de Drive" required>
+        <input type="text" name="drive_folder_id" placeholder="ID o URL de la carpeta de Drive" required>
         <button type="submit" class="btn btn-primary">Agregar</button>
     </form>
 </div>

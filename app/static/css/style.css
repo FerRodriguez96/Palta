@@ -184,6 +184,8 @@ h2 { font-family: 'Space Grotesk', sans-serif; font-size: 1.15rem; margin: 0 0 1
     background: var(--panel-alto); border: 1px solid var(--borde);
 }
 .status-pill.corriendo { border-color: var(--verde); color: var(--verde-claro); }
+.status-pill.cuota-alerta { border-color: var(--amarillo); color: var(--amarillo); }
+.status-pill.cuota-agotada { border-color: var(--rojo); color: #f3a596; }
 
 .card {
     background: var(--panel);

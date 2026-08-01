@@ -60,9 +60,27 @@ def init_db(db_path):
             username TEXT NOT NULL UNIQUE,
             nombre_completo TEXT,
             password_hash TEXT NOT NULL,
-            creado_en TEXT
+            creado_en TEXT,
+            es_admin INTEGER NOT NULL DEFAULT 0
         )
     """)
+
+    cursor.execute("PRAGMA table_info(usuarios)")
+    columnas_usuarios = [fila[1] for fila in cursor.fetchall()]
+    if "es_admin" not in columnas_usuarios:
+        cursor.execute("ALTER TABLE usuarios ADD COLUMN es_admin INTEGER NOT NULL DEFAULT 0")
+
+    # Red de seguridad: si por la razon que sea no queda NINGUN administrador
+    # (por ejemplo, al agregar la columna es_admin a una DB que ya tenia
+    # usuarios creados antes de que existiera el concepto de roles), se
+    # promueve automaticamente al usuario mas antiguo. Así nunca queda
+    # nadie afuera de la gestion de usuarios/credenciales.
+    cursor.execute("SELECT COUNT(*) FROM usuarios WHERE es_admin = 1")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("SELECT id FROM usuarios ORDER BY id ASC LIMIT 1")
+        primero = cursor.fetchone()
+        if primero:
+            cursor.execute("UPDATE usuarios SET es_admin = 1 WHERE id = ?", (primero[0],))
 
     cursor.execute("SELECT COUNT(*) FROM estado_proceso WHERE id = 1")
     if cursor.fetchone()[0] == 0:
@@ -206,12 +224,13 @@ def hay_usuarios():
     return n > 0
 
 
-def crear_usuario(username, password_hash, nombre_completo=""):
+def crear_usuario(username, password_hash, nombre_completo="", es_admin=False):
     conn = _conn()
     conn.execute(
-        """INSERT INTO usuarios (username, nombre_completo, password_hash, creado_en)
-           VALUES (?, ?, ?, ?)""",
-        (username, nombre_completo, password_hash, datetime.now().strftime("%d-%m-%Y %H:%M:%S")),
+        """INSERT INTO usuarios (username, nombre_completo, password_hash, creado_en, es_admin)
+           VALUES (?, ?, ?, ?, ?)""",
+        (username, nombre_completo, password_hash,
+         datetime.now().strftime("%d-%m-%Y %H:%M:%S"), 1 if es_admin else 0),
     )
     conn.commit()
     conn.close()
@@ -233,7 +252,9 @@ def obtener_usuario_por_id(user_id):
 
 def listar_usuarios():
     conn = _conn()
-    rows = conn.execute("SELECT id, username, nombre_completo, creado_en FROM usuarios ORDER BY username").fetchall()
+    rows = conn.execute(
+        "SELECT id, username, nombre_completo, creado_en, es_admin FROM usuarios ORDER BY username"
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -243,3 +264,48 @@ def eliminar_usuario(user_id):
     conn.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
+
+
+def alternar_admin(user_id, es_admin):
+    conn = _conn()
+    conn.execute("UPDATE usuarios SET es_admin = ? WHERE id = ?", (1 if es_admin else 0, user_id))
+    conn.commit()
+    conn.close()
+
+
+def actualizar_password(user_id, password_hash):
+    conn = _conn()
+    conn.execute("UPDATE usuarios SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+    conn.commit()
+    conn.close()
+
+
+def hay_otro_admin(excluyendo_id):
+    conn = _conn()
+    n = conn.execute(
+        "SELECT COUNT(*) FROM usuarios WHERE es_admin = 1 AND id != ?", (excluyendo_id,)
+    ).fetchone()[0]
+    conn.close()
+    return n > 0
+
+
+def actualizar_password(user_id, password_hash):
+    conn = _conn()
+    conn.execute("UPDATE usuarios SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+    conn.commit()
+    conn.close()
+
+
+# ---------- Cuota diaria de YouTube ----------
+
+def contar_subidas_hoy():
+    """Cuenta cuantos videos se subieron hoy (segun fecha_subida guardada
+    en formato dd-mm-YYYY). Sirve para no pasarnos del cupo diario de la
+    API de YouTube."""
+    conn = _conn()
+    hoy = datetime.now().strftime("%d-%m-%Y")
+    total = conn.execute(
+        "SELECT COUNT(*) FROM uploads WHERE fecha_subida LIKE ?", (f"{hoy}%",)
+    ).fetchone()[0]
+    conn.close()
+    return total
