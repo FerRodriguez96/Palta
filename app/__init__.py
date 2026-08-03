@@ -20,9 +20,14 @@ def create_app():
     socketio.init_app(app)
     login_manager.init_app(app)
 
-    from app.services.db_service import init_db
+    from app.services.db_service import init_db, set_estado_proceso
     with app.app_context():
         init_db(app.config["DATABASE_PATH"])
+        # Si el contenedor se cerro de forma abrupta a mitad de un proceso
+        # (docker restart, corte de luz, OOM kill), la fila estado_proceso
+        # puede haber quedado con corriendo=1 para siempre. Al arrancar de
+        # cero no hay nada corriendo de verdad, asi que se resetea siempre.
+        set_estado_proceso(False)
 
     from app.models import User
 

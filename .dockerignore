@@ -5,6 +5,8 @@ __pycache__/
 instance/
 logs/
 downloads/
+backups/
+backup.log
 .env
 .git/
 .gitignore
