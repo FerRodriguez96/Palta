@@ -71,6 +71,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ---- Botón procesar todo ----
     let totalPendientesGlobal = 0;
+    const btnSubirLocal = document.getElementById("btn-subir-local");
+    const inputArchivoLocal = document.getElementById("input-archivo-local");
 
     async function ejecutarProcesarTodo() {
         btnProcesar.disabled = true;
@@ -102,10 +104,12 @@ document.addEventListener("DOMContentLoaded", () => {
             estadoPill.classList.add("corriendo");
             estadoTexto.textContent = "Procesando…";
             if (btnProcesar) btnProcesar.disabled = true;
+            if (btnSubirLocal) btnSubirLocal.disabled = true;
         } else {
             estadoPill.classList.remove("corriendo");
             estadoTexto.textContent = "En espera";
             if (btnProcesar) btnProcesar.disabled = false;
+            if (btnSubirLocal) btnSubirLocal.disabled = false;
         }
     });
 
@@ -463,9 +467,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const modalConfigSiguiente = document.getElementById("modal-config-siguiente");
     const modalConfigCerrar = document.getElementById("modal-config-cerrar");
 
-    let wizardOrden = [];       // [{carpeta_id, carpeta_nombre, drive_id, nombre, titulo_sugerido}]
-    let wizardConfig = {};      // drive_id -> {titulo, descripcion, privacidad, miniaturaFile}
+    let wizardOrden = [];       // [{uid, nombre, titulo_sugerido, carpeta_id?, carpeta_nombre?, drive_id?, archivoVideo?}]
+    let wizardConfig = {};      // uid -> {titulo, descripcion, privacidad, miniaturaFile}
     let wizardIndex = 0;
+    let wizardModo = "drive";   // "drive" | "local"
 
     function iniciarWizard() {
         const marcados = Array.from(modalListaVideos.querySelectorAll("li")).filter(li =>
@@ -474,6 +479,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (marcados.length === 0) return;
 
         wizardOrden = marcados.map(li => ({
+            uid: li.dataset.driveId,
             carpeta_id: carpetaAbierta.id,
             carpeta_nombre: carpetaAbierta.nombre,
             drive_id: li.dataset.driveId,
@@ -483,7 +489,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         wizardConfig = {};
         wizardOrden.forEach(v => {
-            wizardConfig[v.drive_id] = {
+            wizardConfig[v.uid] = {
                 titulo: v.titulo_sugerido,
                 descripcion: "",
                 privacidad: "private",
@@ -491,20 +497,59 @@ document.addEventListener("DOMContentLoaded", () => {
             };
         });
 
+        wizardModo = "drive";
         wizardIndex = 0;
         cerrarModalLista();
         mostrarPasoWizard();
         modalConfig.hidden = false;
     }
 
+    function iniciarWizardLocal(archivos) {
+        wizardOrden = archivos.map(file => {
+            const uid = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+            const nombreSinExtension = file.name.replace(/\.[^/.]+$/, "");
+            return {
+                uid,
+                nombre: file.name,
+                titulo_sugerido: nombreSinExtension.slice(0, 100),
+                archivoVideo: file,
+            };
+        });
+
+        wizardConfig = {};
+        wizardOrden.forEach(v => {
+            wizardConfig[v.uid] = {
+                titulo: v.titulo_sugerido,
+                descripcion: "",
+                privacidad: "private",
+                miniaturaFile: null,
+            };
+        });
+
+        wizardModo = "local";
+        wizardIndex = 0;
+        mostrarPasoWizard();
+        modalConfig.hidden = false;
+    }
+
+    if (btnSubirLocal && inputArchivoLocal) {
+        btnSubirLocal.addEventListener("click", () => inputArchivoLocal.click());
+        inputArchivoLocal.addEventListener("change", () => {
+            const archivos = Array.from(inputArchivoLocal.files || []);
+            inputArchivoLocal.value = "";
+            if (archivos.length === 0) return;
+            iniciarWizardLocal(archivos);
+        });
+    }
+
     function guardarPasoActual() {
         const v = wizardOrden[wizardIndex];
         if (!v) return;
-        wizardConfig[v.drive_id] = {
+        wizardConfig[v.uid] = {
             titulo: inputTitulo.value.trim().slice(0, 100),
             descripcion: inputDescripcion.value.trim(),
             privacidad: inputPrivacidad.value,
-            miniaturaFile: inputMiniatura.files[0] || wizardConfig[v.drive_id].miniaturaFile,
+            miniaturaFile: inputMiniatura.files[0] || wizardConfig[v.uid].miniaturaFile,
         };
     }
 
@@ -522,7 +567,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function mostrarPasoWizard() {
         const v = wizardOrden[wizardIndex];
         if (!v) return;
-        const cfg = wizardConfig[v.drive_id];
+        const cfg = wizardConfig[v.uid];
 
         modalConfigOriginal.textContent = v.nombre;
         inputTitulo.value = cfg.titulo;
@@ -600,9 +645,17 @@ document.addEventListener("DOMContentLoaded", () => {
     if (modalListaContinuar) modalListaContinuar.addEventListener("click", iniciarWizard);
 
     async function finalizarWizard() {
+        if (wizardModo === "local") {
+            await finalizarWizardLocal();
+        } else {
+            await finalizarWizardDrive();
+        }
+    }
+
+    async function finalizarWizardDrive() {
         const formData = new FormData();
         const items = wizardOrden.map(v => {
-            const cfg = wizardConfig[v.drive_id];
+            const cfg = wizardConfig[v.uid];
             return {
                 carpeta_id: v.carpeta_id,
                 drive_id: v.drive_id,
@@ -614,26 +667,89 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         formData.append("items", JSON.stringify(items));
         wizardOrden.forEach(v => {
-            const cfg = wizardConfig[v.drive_id];
+            const cfg = wizardConfig[v.uid];
             if (cfg.miniaturaFile) {
                 formData.append(`thumbnail_${v.drive_id}`, cfg.miniaturaFile);
             }
         });
+        const descripcion = `${wizardOrden.length} video${wizardOrden.length === 1 ? "" : "s"} de Drive`;
+        await enviarProceso("/procesar/seleccion", formData, descripcion);
+    }
 
+    async function finalizarWizardLocal() {
+        const formData = new FormData();
+        const items = wizardOrden.map(v => {
+            const cfg = wizardConfig[v.uid];
+            return {
+                uid: v.uid,
+                titulo: cfg.titulo,
+                descripcion: cfg.descripcion,
+                privacidad: cfg.privacidad,
+            };
+        });
+        formData.append("items", JSON.stringify(items));
+        wizardOrden.forEach(v => {
+            formData.append(`video_${v.uid}`, v.archivoVideo);
+            const cfg = wizardConfig[v.uid];
+            if (cfg.miniaturaFile) {
+                formData.append(`thumbnail_${v.uid}`, cfg.miniaturaFile);
+            }
+        });
+        const descripcion = `${wizardOrden.length} archivo${wizardOrden.length === 1 ? "" : "s"} local${wizardOrden.length === 1 ? "" : "es"}`;
+        await enviarProceso("/procesar/local", formData, descripcion);
+    }
+
+    function enviarProceso(url, formData, descripcion) {
         cerrarModalConfig();
         if (btnProcesar) btnProcesar.disabled = true;
+        if (btnSubirLocal) btnSubirLocal.disabled = true;
 
-        try {
-            const res = await fetch("/procesar/seleccion", { method: "POST", body: formData });
-            if (!res.ok && res.status !== 202) {
-                const data = await res.json().catch(() => ({}));
-                alert(data.status || "No se pudo iniciar el procesamiento.");
+        // Barra de progreso del tramo "navegador -> servidor", separada del
+        // progreso de "servidor -> YouTube" que ya llega por WebSocket una vez
+        // que el archivo termino de llegar. Reusa la misma UI de progreso.
+        const claveEnvio = `envio::${Date.now()}`;
+        progresos[claveEnvio] = {
+            carpeta: "Enviando al servidor",
+            archivo: descripcion,
+            etapa: "subiendo al servidor",
+            porcentaje: 0,
+        };
+        renderProgreso();
+
+        return new Promise((resolve) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", url);
+
+            xhr.upload.onprogress = (e) => {
+                if (!e.lengthComputable) return;
+                progresos[claveEnvio].porcentaje = Math.round((e.loaded / e.total) * 100);
+                renderProgreso();
+            };
+
+            xhr.onload = () => {
+                delete progresos[claveEnvio];
+                renderProgreso();
+                if (xhr.status !== 202) {
+                    let mensaje = "No se pudo iniciar el procesamiento.";
+                    try { mensaje = JSON.parse(xhr.responseText).status || mensaje; } catch (err) { /* noop */ }
+                    alert(mensaje);
+                    if (btnProcesar) btnProcesar.disabled = false;
+                    if (btnSubirLocal) btnSubirLocal.disabled = false;
+                }
+                resolve();
+            };
+
+            xhr.onerror = () => {
+                delete progresos[claveEnvio];
+                renderProgreso();
+                alert("Error de red al iniciar el procesamiento.");
                 if (btnProcesar) btnProcesar.disabled = false;
-            }
-        } catch (e) {
-            alert("Error de red al iniciar el procesamiento.");
-            if (btnProcesar) btnProcesar.disabled = false;
-        }
+                if (btnSubirLocal) btnSubirLocal.disabled = false;
+                resolve();
+            };
+
+            xhr.send(formData);
+        });
     }
 
     // Cerrar modales con Escape

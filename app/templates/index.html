@@ -41,6 +41,10 @@
 </div>
 
 <div class="action-row">
+    <input type="file" id="input-archivo-local" accept="video/*" multiple hidden>
+    <button class="btn btn-secondary" id="btn-subir-local" {{ 'disabled' if estado and estado.corriendo }}>
+        Subir archivo local
+    </button>
     <button class="btn btn-primary" id="btn-procesar" {{ 'disabled' if estado and estado.corriendo }}>
         Procesar todo
     </button>
@@ -106,7 +110,7 @@
             <button type="button" class="modal-close" id="modal-config-cerrar" aria-label="Cerrar">&times;</button>
         </div>
         <div class="modal-body">
-            <div class="modal-original">Nombre original en Drive: <span id="modal-config-original" class="mono"></span></div>
+            <div class="modal-original">Nombre del archivo original: <span id="modal-config-original" class="mono"></span></div>
 
             <label class="modal-label">Título en YouTube (máx. 100 caracteres)
                 <input type="text" id="modal-config-input-titulo" maxlength="100">

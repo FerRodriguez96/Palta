@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM debian:12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -24,7 +25,13 @@ RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# --default-timeout y --retries: la descarga de dependencias grandes
+# (google-api-python-client, ~12MB) a veces corta por una red lenta o
+# inestable en el host; con esto pip espera mas y reintenta antes de
+# rendirse. El cache mount evita tener que volver a bajar todo desde cero
+# si el build se reintenta.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --default-timeout=120 --retries 5 -r requirements.txt
 
 COPY . .
 

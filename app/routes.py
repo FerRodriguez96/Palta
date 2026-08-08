@@ -7,7 +7,7 @@ from flask_login import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app.core.uploader import procesar_videos, procesar_seleccionados, hay_proceso_corriendo
+from app.core.uploader import procesar_videos, procesar_seleccionados, procesar_archivos_locales, hay_proceso_corriendo
 from app.utils.log_buffer import get_logs
 from app.services import db_service
 from app.services.drive_service import listar_archivos, limpiar_nombre_archivo
@@ -321,6 +321,76 @@ def estado():
         "corriendo": hay_proceso_corriendo(),
         **(db_service.get_estado_proceso() or {}),
     })
+
+
+@bp.route("/procesar/local", methods=["POST"])
+def procesar_local():
+    if hay_proceso_corriendo():
+        return {"status": "Ya hay un procesamiento en curso"}, 409
+
+    items_raw = request.form.get("items")
+    if not items_raw:
+        return {"status": "No se seleccionó ningún archivo"}, 400
+
+    try:
+        items_entrantes = json.loads(items_raw)
+    except Exception:
+        return {"status": "Formato de selección inválido"}, 400
+
+    download_path = current_app.config["DOWNLOAD_PATH"]
+    os.makedirs(download_path, exist_ok=True)
+
+    items = []
+    for it in items_entrantes:
+        uid = it.get("uid")
+        if not uid:
+            continue
+
+        archivo_video = request.files.get(f"video_{uid}")
+        if not archivo_video or not archivo_video.filename:
+            continue
+
+        nombre_original = archivo_video.filename
+        extension = os.path.splitext(nombre_original)[1] or ".mp4"
+        ruta_local = os.path.join(download_path, f"local-{uid}{extension}")
+        archivo_video.save(ruta_local)
+
+        titulo = (it.get("titulo") or "").strip()[:TITULO_MAX_LEN] or None
+        descripcion = (it.get("descripcion") or "").strip()[:5000] or None
+        privacidad = it.get("privacidad") if it.get("privacidad") in ("private", "unlisted", "public") else "private"
+
+        miniatura_path = None
+        archivo_thumb = request.files.get(f"thumbnail_{uid}")
+        if archivo_thumb and archivo_thumb.filename:
+            ext_thumb = os.path.splitext(archivo_thumb.filename)[1] or ".jpg"
+            miniatura_path = os.path.join(download_path, f"thumb-local-{uid}{ext_thumb}")
+            archivo_thumb.save(miniatura_path)
+
+        items.append({
+            "ruta_local": ruta_local,
+            "identificador": f"local-{uid}",
+            "nombre_original": nombre_original,
+            "titulo": titulo,
+            "descripcion": descripcion,
+            "privacidad": privacidad,
+            "miniatura_path": miniatura_path,
+        })
+
+    if not items:
+        return {"status": "La selección no es válida"}, 400
+
+    app = current_app._get_current_object()
+    config = dict(app.config)
+    usuario = current_user.username
+
+    def run():
+        with app.app_context():
+            procesar_archivos_locales(config, items, usuario)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+
+    return {"status": f"Subiendo {len(items)} archivo(s) local(es)"}, 202
 
 
 @bp.route("/api/subidas")
